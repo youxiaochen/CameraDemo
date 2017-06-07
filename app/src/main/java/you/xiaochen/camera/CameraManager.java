@@ -468,6 +468,7 @@ public final class CameraManager {
      * @param y
      */
     public void handleFocusMetering(float x, float y) {
+        if (mCamera == null) return;
         Camera.Parameters params = mCamera.getParameters();
         Camera.Size previewSize = params.getPreviewSize();
         Rect focusRect = calculateTapArea(x, y, 1f, previewSize);
