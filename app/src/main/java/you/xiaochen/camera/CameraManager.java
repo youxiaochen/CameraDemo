@@ -10,6 +10,7 @@ import android.media.MediaRecorder;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 import you.xiaochen.utils.LogUtils;
@@ -148,8 +149,8 @@ public final class CameraManager {
                 parameters.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);
                 break;
         }
-        List<Camera.Size> pictureSizes = parameters.getSupportedPictureSizes();
-        List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
+        List<Camera.Size> pictureSizes = filterSizes(parameters.getSupportedPictureSizes(), width, height);
+        List<Camera.Size> previewSizes = filterSizes(parameters.getSupportedPreviewSizes(), width, height);
         if (!isEmpty(pictureSizes) && !isEmpty(previewSizes)) {
             /*for (Camera.Size size : pictureSizes) {
                 LogUtils.i("pictureSize " + size.width + "  " + size.height);
@@ -198,6 +199,33 @@ public final class CameraManager {
      */
     private <E> boolean isEmpty(List<E> list) {
         return list == null || list.isEmpty();
+    }
+
+    /**
+     * 过滤相素太小的参数
+     * @param sizes
+     * @return
+     */
+    private List<Camera.Size> filterSizes(List<Camera.Size> sizes, int w, int h) {
+        if (sizes == null || sizes.isEmpty()) return sizes;
+        LogUtils.i("filterSizes "+sizes.size());
+        List<Camera.Size> copy = new ArrayList<>(sizes.size());
+        for (Camera.Size size : sizes) {
+            copy.add(size);
+        }
+        Iterator<Camera.Size> iterator = copy.iterator();
+        while (iterator.hasNext()) {
+            Camera.Size size = iterator.next();
+            if (size.height < w / 2) {
+                iterator.remove();
+            }
+        }
+        if (copy.isEmpty()) {
+            return sizes;
+        } else {
+            LogUtils.i("copy size"+copy.size());
+            return copy;
+        }
     }
 
     /**

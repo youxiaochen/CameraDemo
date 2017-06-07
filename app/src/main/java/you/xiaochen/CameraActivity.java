@@ -6,8 +6,10 @@ import android.content.Intent;
 import android.graphics.PointF;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.PersistableBundle;
+import android.provider.Settings;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AppCompatActivity;
 import android.view.Surface;
@@ -16,6 +18,7 @@ import android.view.View;
 import android.widget.ImageView;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.util.concurrent.TimeUnit;
@@ -99,11 +102,7 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
     /**
      * 视频录制地址
      */
-    private String recorderPath;
-    /**
-     * 录制视频的时间,毫秒
-     */
-    private int recordSecond;
+    private String recorderPath, photoPath;
     /**
      * 获取照片订阅, 进度订阅
      */
@@ -111,12 +110,7 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
     /**
      * 是否正在录制
      */
-    private boolean isRecording;
-
-    /**
-     * 是否为点了拍摄状态(没有拍照预览的状态)
-     */
-    private boolean isPhotoTakingState;
+    private boolean isRecording, isResume;
 
     public static void lanuchForPhoto(Activity context) {
         Intent intent = new Intent(context, CameraActivity.class);
@@ -169,28 +163,7 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
 
             @Override
             public void onLongClick(CameraProgressBar progressBar) {
-                isSupportRecord = true;
-                cameraManager.setCameraType(1);
-                rl_camera.setVisibility(View.GONE);
-                recorderPath = FileUtils.getUploadVideoFile(mContext);
-                cameraManager.startMediaRecord(recorderPath);
-                isRecording = true;
-                progressSubscription = Observable.interval(100, TimeUnit.MILLISECONDS, AndroidSchedulers.mainThread()).take(max).subscribe(new Subscriber<Long>() {
-                    @Override
-                    public void onCompleted() {
-                        stopRecorder(true);
-                    }
-
-                    @Override
-                    public void onError(Throwable e) {
-
-                    }
-
-                    @Override
-                    public void onNext(Long aLong) {
-                        mProgressbar.setProgress(mProgressbar.getProgress() + 1);
-                    }
-                });
+                startRecorder(max);
             }
 
             @Override
@@ -200,11 +173,23 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
 
             @Override
             public void onLongClickUp(CameraProgressBar progressBar) {
-                isSupportRecord = false;
-                cameraManager.setCameraType(0);
-                stopRecorder(true);
+                stopRecorder();
                 if (progressSubscription != null) {
                     progressSubscription.unsubscribe();
+                }
+                int recordSecond = mProgressbar.getProgress() * PLUSH_PROGRESS;//录制多少毫秒
+                mProgressbar.reset();
+                if (recordSecond < MIN_RECORD_TIME) {//小于最小录制时间作废
+                    Toast.makeText(mContext, "录制时间不可小1秒", Toast.LENGTH_SHORT).show();
+                    if (recorderPath != null) {
+                        FileUtils.delteFiles(new File(recorderPath));
+                        recorderPath = null;
+                    }
+                    setTakeButtonShow(true);
+                } else if (isResume && mTextureView != null && mTextureView.isAvailable()){
+                    setTakeButtonShow(false);
+                    cameraManager.closeCamera();
+                    playerManager.playMedia(new Surface(mTextureView.getSurfaceTexture()), recorderPath);
                 }
             }
 
@@ -257,51 +242,70 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
     private void setTakeButtonShow(boolean isShow) {
         if (isShow) {
             mProgressbar.setVisibility(View.VISIBLE);
+            iv_choice.setVisibility(View.INVISIBLE);
             rl_camera.setVisibility(cameraManager.isSupportFlashCamera()
                     || cameraManager.isSupportFrontCamera() ? View.VISIBLE : View.GONE);
         } else {
             mProgressbar.setVisibility(View.GONE);
+            iv_choice.setVisibility(View.VISIBLE);
             rl_camera.setVisibility(View.GONE);
         }
     }
 
     /**
-     * 停止拍摄
+     * 停止录制
      */
-    private void stopRecorder(boolean play) {
-        isRecording = false;
+    private void stopRecorder() {
         cameraManager.stopMediaRecord();
-        recordSecond = mProgressbar.getProgress() * PLUSH_PROGRESS;//录制多少毫秒
-        mProgressbar.reset();
-        if (recordSecond < MIN_RECORD_TIME) {//小于最小录制时间作废
-            if (recorderPath != null) {
-                FileUtils.delteFiles(new File(recorderPath));
-                recorderPath = null;
-                recordSecond = 0;
-            }
-            setTakeButtonShow(true);
-        } else if (play && mTextureView != null && mTextureView.isAvailable()){
-            setTakeButtonShow(false);
-            mProgressbar.setVisibility(View.GONE);
-            iv_choice.setVisibility(View.VISIBLE);
-            cameraManager.closeCamera();
-            playerManager.playMedia(new Surface(mTextureView.getSurfaceTexture()), recorderPath);
+        isRecording = false;
+    }
+
+    /**
+     * 开始录制
+     */
+    private void startRecorder(int max) {
+        try {
+            recorderPath = FileUtils.getUploadVideoFile(mContext);
+            cameraManager.startMediaRecord(recorderPath);
+            isRecording = true;
+            progressSubscription = Observable.interval(100, TimeUnit.MILLISECONDS, AndroidSchedulers.mainThread())
+                    .take(max).subscribe(new Subscriber<Long>() {
+                        @Override
+                        public void onCompleted() {
+                            stopRecorder();
+                            mProgressbar.reset();
+                            if (isResume && mTextureView != null && mTextureView.isAvailable()){
+                                setTakeButtonShow(false);
+                                cameraManager.closeCamera();
+                                playerManager.playMedia(new Surface(mTextureView.getSurfaceTexture()), recorderPath);
+                            }
+                        }
+
+                        @Override
+                        public void onError(Throwable e) {
+                        }
+
+                        @Override
+                        public void onNext(Long aLong) {
+                            mProgressbar.setProgress(mProgressbar.getProgress() + 1);
+                        }
+                    });
+        } catch (Exception e) {
+            Toast.makeText(mContext, "没有权限...", Toast.LENGTH_SHORT).show();
         }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        isResume = true;
+        isRecording = false;
         if (mTextureView.isAvailable()) {
-            if (recorderPath != null) {//优先播放视频
-                iv_choice.setVisibility(View.VISIBLE);
+            if (recorderPath != null) {
                 setTakeButtonShow(false);
                 playerManager.playMedia(new Surface(mTextureView.getSurfaceTexture()), recorderPath);
             } else {
-                iv_choice.setVisibility(View.GONE);
-                setTakeButtonShow(true);
-                cameraManager.openCamera(mTextureView.getSurfaceTexture(),
-                        mTextureView.getWidth(), mTextureView.getHeight());
+                openCamera(mTextureView.getSurfaceTexture(), mTextureView.getWidth(), mTextureView.getHeight());
             }
         } else {
             mTextureView.setSurfaceTextureListener(listener);
@@ -310,15 +314,20 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
 
     @Override
     protected void onPause() {
-        if (progressSubscription != null) {
-            progressSubscription.unsubscribe();
+        isResume = false;
+        if (isRecording) {
+            stopRecorder();
+            if (progressSubscription != null) {
+                progressSubscription.unsubscribe();
+            }
+            mProgressbar.reset();
+            FileUtils.delteFiles(new File(recorderPath));
+            recorderPath = null;
         }
         if (takePhotoSubscription != null) {
             takePhotoSubscription.unsubscribe();
         }
-        if (isRecording) {
-            stopRecorder(false);
-        }
+        photoPath = null;
         cameraManager.closeCamera();
         playerManager.stopMedia();
         super.onPause();
@@ -334,22 +343,10 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
     public void onClick(View v) {
         switch (v.getId()) {
             case R.id.iv_close:
-                if (recorderPath != null) {//有拍摄好的正在播放,重新拍摄
-                    FileUtils.delteFiles(new File(recorderPath));
-                    recorderPath = null;
-                    recordSecond = 0;
-                    playerManager.stopMedia();
-                    setTakeButtonShow(true);
-                    iv_choice.setVisibility(View.GONE);
-                    cameraManager.openCamera(mTextureView.getSurfaceTexture(), mTextureView.getWidth(), mTextureView.getHeight());
-                } else if(isPhotoTakingState) {
-                    isPhotoTakingState = false;
-                    iv_choice.setVisibility(View.GONE);
-                    setTakeButtonShow(true);
-                    cameraManager.restartPreview();
-                } else {
-                    finish();
+                if (backClose()) {
+                    return;
                 }
+                finish();
                 break;
             case R.id.iv_choice://选择图片或视频
 
@@ -367,19 +364,74 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
     }
 
     /**
+     * 返回关闭界面
+     */
+    private boolean backClose() {
+        if (recorderPath != null) {//正在录制或正在播放
+            if (isRecording) {//正在录制
+                stopRecorder();
+                if (progressSubscription != null) {
+                    progressSubscription.unsubscribe();
+                }
+                mProgressbar.reset();
+                FileUtils.delteFiles(new File(recorderPath));
+                recorderPath = null;
+                if (mTextureView != null && mTextureView.isAvailable()) {
+                    openCamera(mTextureView.getSurfaceTexture(), mTextureView.getWidth(), mTextureView.getHeight());
+                }
+                return true;
+            }
+            playerManager.stopMedia();
+            FileUtils.delteFiles(new File(recorderPath));
+            recorderPath = null;
+            if (mTextureView != null && mTextureView.isAvailable()) {
+                openCamera(mTextureView.getSurfaceTexture(), mTextureView.getWidth(), mTextureView.getHeight());
+            }
+            return true;
+        }
+        if (photoPath != null) {//有拍照
+            photoPath = null;//有需求也可以删除
+            cameraManager.restartPreview();
+            setTakeButtonShow(true);
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (backClose()) {
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    /**
+     * 开启照相机
+     * @param texture
+     * @param width
+     * @param height
+     */
+    private void openCamera(SurfaceTexture texture, int width, int height) {
+        setTakeButtonShow(true);
+        try {
+            cameraManager.openCamera(texture, width, height);
+        } catch (RuntimeException e) {
+            Toast.makeText(mContext, "没有权限...", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
      * camera回调监听
      */
     private TextureView.SurfaceTextureListener listener = new TextureView.SurfaceTextureListener() {
         @Override
         public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
             if (recorderPath != null) {
-                iv_choice.setVisibility(View.VISIBLE);
                 setTakeButtonShow(false);
                 playerManager.playMedia(new Surface(texture), recorderPath);
             } else {
-                setTakeButtonShow(true);
-                iv_choice.setVisibility(View.GONE);
-                cameraManager.openCamera(texture, width, height);
+                openCamera(texture, width, height);
             }
         }
 
@@ -405,9 +457,8 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
                 @Override
                 public void call(Subscriber<? super Boolean> subscriber) {
                     if (!subscriber.isUnsubscribed()) {
-                        String photoPath = FileUtils.getUploadPhotoFile(mContext);
-                        isPhotoTakingState = FileUtils.savePhoto(photoPath, data, cameraManager.isCameraFrontFacing());
-                        subscriber.onNext(isPhotoTakingState);
+                        photoPath = FileUtils.getUploadPhotoFile(mContext);
+                        subscriber.onNext(FileUtils.savePhoto(photoPath, data, cameraManager.isCameraFrontFacing()));
                     }
                 }
             }).subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread()).subscribe(new Subscriber<Boolean>() {
