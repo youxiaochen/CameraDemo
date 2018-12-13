@@ -136,7 +136,7 @@ public class CameraActivity extends AppCompatActivity implements View.OnClickLis
         iv_choice = (ImageView) findViewById(R.id.iv_choice);
         iv_close.setOnClickListener(this);
         iv_facing = (ImageView) findViewById(R.id.iv_facing);
-        iv_close.setOnClickListener(this);
+        iv_facing.setOnClickListener(this);
         tv_flash = (TextView) findViewById(R.id.tv_flash);
         tv_flash.setOnClickListener(this);
     }
